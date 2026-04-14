@@ -7,5 +7,5 @@ use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
-    use HasApiTokens, Notifiable; // ← ajoute HasApiTokens ici
+    use HasApiTokens, Notifiable; 
 }
