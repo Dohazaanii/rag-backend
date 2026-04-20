@@ -23,7 +23,7 @@ class ChatController extends Controller
     {
         $conversation = Conversation::create([
             'user_id' => $request->user()->id,
-            'title'   => 'Nouvelle conversation',
+            'title'   => 'New conversation',
         ]);
 
         return response()->json($conversation);
@@ -40,53 +40,102 @@ class ChatController extends Controller
 
     public function sendMessage(Request $request, $id)
     {
-        set_time_limit(120);
+        set_time_limit(300);
 
         $request->validate([
-            'content' => 'required|string',
+            'content' => 'nullable|string',
+            'file'    => 'nullable|file|mimes:pdf,doc,docx|max:20480',
         ]);
 
-        // 1. ✅ Sauvegarder le message USER en premier
+        $content  = $request->input('content', '');
+        $filePath = null;
+        $fileName = null;
+
+        // ── 1. Handle uploaded file ──────────────────────────
+        if ($request->hasFile('file') && $request->file('file')->isValid()) {
+            $file     = $request->file('file');
+            $fileName = $file->getClientOriginalName();
+            $stored   = $file->store('rag_uploads', 'local');
+            $filePath = storage_path('app/' . $stored);
+        }
+
+        // ── 2. Save user message ─────────────────────────────
         Message::create([
             'conversation_id' => $id,
             'role'            => 'user',
-            'content'         => $request->content,
+            'content'         => $content ?: ('File: ' . $fileName),
+            'file_name'       => $fileName,
         ]);
 
-        // 2. ✅ Appeler le script Python RAG
+        // ── 3. Call Python RAG script ────────────────────────
         try {
-            $process = new Process([
+            $question = $content ?: 'Please provide a concise summary of this document.';
+
+            $cmd = [
                 env('PYTHON_PATH', 'python'),
                 env('RAG_SCRIPT_PATH'),
-                $request->content
+                '--question', $question,
+            ];
+
+            if ($filePath) {
+                $cmd[] = '--file';
+                $cmd[] = $filePath;
+            }
+
+            $process = new Process($cmd);
+            $process->setTimeout(300);
+
+            // Force UTF-8 environment on Windows
+            $process->setEnv([
+                'PYTHONIOENCODING' => 'utf-8',
+                'PYTHONUTF8'       => '1',
             ]);
 
-            $process->setTimeout(120);
             $process->run();
 
             if (!$process->isSuccessful()) {
                 throw new \RuntimeException($process->getErrorOutput());
             }
 
-            $output    = json_decode($process->getOutput(), true);
-            $aiContent = $output['answer'] ?? 'Pas de réponse.';
+            // Clean and decode output
+            $rawOutput = $process->getOutput();
+
+            // Remove BOM if present
+            $rawOutput = preg_replace('/^\xEF\xBB\xBF/', '', $rawOutput);
+
+            // Force UTF-8 encoding
+            $rawOutput = mb_convert_encoding($rawOutput, 'UTF-8', 'UTF-8');
+
+            $output    = json_decode($rawOutput, true);
+            $aiContent = $output['answer'] ?? 'No response.';
+
+            // Clean non-UTF-8 characters from answer
+            $aiContent = mb_convert_encoding($aiContent, 'UTF-8', 'UTF-8');
+            $aiContent = preg_replace('/[^\x{0009}\x{000A}\x{000D}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}\x{10000}-\x{10FFFF}]/u', '', $aiContent);
+
+            // Append source pages if available
+            if (!empty($output['pages'])) {
+                $pages     = implode(', ', $output['pages']);
+                $aiContent .= "\n\nSources: pages " . $pages;
+            }
 
         } catch (\Exception $e) {
-            $aiContent = '❌ Erreur RAG : ' . $e->getMessage();
+            $aiContent = 'RAG Error: ' . $e->getMessage();
         }
 
-        // 3. ✅ Sauvegarder la réponse IA
+        // ── 4. Save AI message ───────────────────────────────
         $aiMessage = Message::create([
             'conversation_id' => $id,
             'role'            => 'assistant',
             'content'         => $aiContent,
         ]);
 
-        // 4. ✅ Mettre à jour le titre
+        // ── 5. Update conversation title ─────────────────────
         $conversation = Conversation::find($id);
-        if ($conversation->title === 'Nouvelle conversation') {
+        if ($conversation->title === 'New conversation') {
+            $title = $content ?: $fileName;
             $conversation->update([
-                'title' => substr($request->content, 0, 50),
+                'title' => mb_substr($title, 0, 50),
             ]);
         }
 
@@ -96,6 +145,6 @@ class ChatController extends Controller
     public function deleteConversation($id)
     {
         Conversation::find($id)->delete();
-        return response()->json(['message' => 'Conversation supprimée']);
+        return response()->json(['message' => 'Conversation deleted']);
     }
 }
