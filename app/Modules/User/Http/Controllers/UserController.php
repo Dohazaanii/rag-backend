@@ -1,5 +1,4 @@
 <?php
-
 namespace App\Modules\User\Http\Controllers;
 
 use Illuminate\Http\Request;
@@ -14,15 +13,12 @@ class UserController extends Controller
             'email'    => 'required|email',
             'password' => 'required',
         ]);
-
         if (!Auth::attempt($request->only('email', 'password'))) {
             return response()->json([
                 'message' => 'Email ou mot de passe incorrect'
             ], 401);
         }
-
         $token = $request->user()->createToken('auth_token')->plainTextToken;
-
         return response()->json([
             'message'      => 'Connecté avec succès',
             'access_token' => $token,
@@ -33,7 +29,6 @@ class UserController extends Controller
     public function logout(Request $request)
     {
         $request->user()->tokens()->delete();
-
         return response()->json([
             'message' => 'Déconnecté avec succès'
         ]);

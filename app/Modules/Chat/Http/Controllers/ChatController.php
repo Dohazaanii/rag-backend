@@ -6,11 +6,10 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use App\Modules\Chat\Models\Conversation;
 use App\Modules\Chat\Models\Message;
-use Illuminate\Support\Facades\Http;
+use Symfony\Component\Process\Process;
 
 class ChatController extends Controller
 {
-    // Récupérer toutes les conversations de l'utilisateur
     public function getConversations(Request $request)
     {
         $conversations = Conversation::where('user_id', $request->user()->id)
@@ -20,7 +19,6 @@ class ChatController extends Controller
         return response()->json($conversations);
     }
 
-    // Créer une nouvelle conversation
     public function createConversation(Request $request)
     {
         $conversation = Conversation::create([
@@ -31,7 +29,6 @@ class ChatController extends Controller
         return response()->json($conversation);
     }
 
-    // Récupérer les messages d'une conversation
     public function getMessages($id)
     {
         $messages = Message::where('conversation_id', $id)
@@ -41,46 +38,51 @@ class ChatController extends Controller
         return response()->json($messages);
     }
 
-    // Envoyer un message et obtenir une réponse d'Ollama
     public function sendMessage(Request $request, $id)
     {
+        set_time_limit(120);
+
         $request->validate([
             'content' => 'required|string',
         ]);
 
-        // Sauvegarder le message de l'utilisateur
+        // 1. ✅ Sauvegarder le message USER en premier
         Message::create([
             'conversation_id' => $id,
             'role'            => 'user',
             'content'         => $request->content,
         ]);
 
-        // Récupérer l'historique des messages
-        $history = Message::where('conversation_id', $id)
-            ->orderBy('created_at', 'asc')
-            ->get()
-            ->map(fn($m) => [
-                'role'    => $m->role,
-                'content' => $m->content,
+        // 2. ✅ Appeler le script Python RAG
+        try {
+            $process = new Process([
+                env('PYTHON_PATH', 'python'),
+                env('RAG_SCRIPT_PATH'),
+                $request->content
             ]);
 
-        // Appeler Ollama
-        $response = Http::timeout(120)->post('http://localhost:11434/api/chat', [
-            'model'    => 'llama3',
-            'messages' => $history,
-            'stream'   => false,
-        ]);
+            $process->setTimeout(120);
+            $process->run();
 
-        $aiContent = $response->json()['message']['content'];
+            if (!$process->isSuccessful()) {
+                throw new \RuntimeException($process->getErrorOutput());
+            }
 
-        // Sauvegarder la réponse de l'IA
+            $output    = json_decode($process->getOutput(), true);
+            $aiContent = $output['answer'] ?? 'Pas de réponse.';
+
+        } catch (\Exception $e) {
+            $aiContent = '❌ Erreur RAG : ' . $e->getMessage();
+        }
+
+        // 3. ✅ Sauvegarder la réponse IA
         $aiMessage = Message::create([
             'conversation_id' => $id,
             'role'            => 'assistant',
             'content'         => $aiContent,
         ]);
 
-        // Mettre à jour le titre si c'est le premier message
+        // 4. ✅ Mettre à jour le titre
         $conversation = Conversation::find($id);
         if ($conversation->title === 'Nouvelle conversation') {
             $conversation->update([
@@ -91,7 +93,6 @@ class ChatController extends Controller
         return response()->json($aiMessage);
     }
 
-    // Supprimer une conversation
     public function deleteConversation($id)
     {
         Conversation::find($id)->delete();

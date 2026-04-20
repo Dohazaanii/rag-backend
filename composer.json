@@ -10,7 +10,8 @@
         "artem-schander/l5-modular": "^2.1",
         "laravel/framework": "^13.0",
         "laravel/sanctum": "^4.3",
-        "laravel/tinker": "^3.0"
+        "laravel/tinker": "^3.0",
+        "symfony/process": "^8.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
