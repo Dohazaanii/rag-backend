@@ -11,6 +11,12 @@ Route::get('/bonjour', function () {
 });
 
 Route::post('/login', [UserController::class, 'login']);
+Route::post('/ask', function (\Illuminate\Http\Request $request) {
+    return \App\Services\RagService::ask(
+        $request->question,
+        $request->file
+    );
+});
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [UserController::class, 'logout']);
