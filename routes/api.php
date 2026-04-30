@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Modules\User\Http\Controllers\UserController;
 use App\Modules\Chat\Http\Controllers\ChatController;
+use App\Modules\Chat\Http\Controllers\GeneralChatController;
 
 Route::get('/bonjour', function () {
     return response()->json([
@@ -28,4 +29,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/conversations/{id}/messages', [ChatController::class, 'getMessages']);
     Route::post('/conversations/{id}/messages', [ChatController::class, 'sendMessage']);
     Route::delete('/conversations/{id}', [ChatController::class, 'deleteConversation']);
+    Route::post('/general/conversations',    [GeneralChatController::class, 'createConversation']);
+    Route::get('/general/{id}/messages',     [GeneralChatController::class, 'getMessages']);
+    Route::post('/general/{id}/messages',    [GeneralChatController::class, 'sendMessage']);
 });
+

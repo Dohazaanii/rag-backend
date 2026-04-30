@@ -4,7 +4,7 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use App\Modules\Chat\Models\Conversation;
 use App\Modules\Chat\Models\Message;
-use Symfony\Component\Process\Process;
+use Illuminate\Support\Facades\Http;
 
 class ChatController extends Controller
 {
@@ -45,16 +45,15 @@ class ChatController extends Controller
             'file'    => 'nullable|file|mimes:pdf,doc,docx|max:20480',
         ]);
 
-        $content  = $request->input('content', '');
-        $filePath = null;
-        $fileName = null;
+        $content     = $request->input('content', '');
+        $fileContent = null;
+        $fileName    = null;
 
         // ── 1. Handle uploaded file ──────────────────────────
         if ($request->hasFile('file') && $request->file('file')->isValid()) {
-            $file     = $request->file('file');
-            $fileName = $file->getClientOriginalName();
-            $stored   = $file->store('rag_uploads', 'local');
-            $filePath = storage_path('app/' . $stored);
+            $file        = $request->file('file');
+            $fileName    = $file->getClientOriginalName();
+            $fileContent = base64_encode(file_get_contents($file->getRealPath()));
         }
 
         // ── 2. Save user message ─────────────────────────────
@@ -65,54 +64,35 @@ class ChatController extends Controller
             'file_name'       => $fileName,
         ]);
 
- // ── 3. Call Python RAG via SOCKET (DOCKER READY) ─────────
-try {
-    $question = $content ?: 'Please provide a concise summary of this document.';
+        // ── 3. Call Python RAG via HTTP ──────────────────────────
+        try {
+            $question = $content ?: 'Please provide a concise summary of this document.';
 
-    $socket = fsockopen("127.0.0.1", 9000, $errno, $errstr, 10);
+            $ragResponse = Http::timeout(300)->post('http://127.0.0.1:9000', [
+                'question'     => $question,
+                'file_content' => $fileContent,
+                'file_name'    => $fileName,
+            ]);
 
-    if (!$socket) {
-        throw new \Exception("Cannot connect to RAG service: $errstr ($errno)");
-    }
+            $output = $ragResponse->json();
 
-    $payload = json_encode([
-        "question" => $question,
-        "file"     => $filePath
-    ]);
+            if (!$output) {
+                throw new \Exception("Invalid JSON from RAG: " . $ragResponse->body());
+            }
 
-    fwrite($socket, $payload);
+            $aiContent = $output['answer'] ?? 'No response.';
 
-    $response = "";
-    while (!feof($socket)) {
-        $response .= fgets($socket, 1024);
-    }
+            $aiContent = mb_convert_encoding($aiContent, 'UTF-8', 'UTF-8');
+            $aiContent = preg_replace('/[^\x{0009}\x{000A}\x{000D}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}\x{10000}-\x{10FFFF}]/u', '', $aiContent);
 
-    fclose($socket);
+            if (!empty($output['pages'])) {
+                $pages = implode(', ', $output['pages']);
+                $aiContent .= "\n\nSources: pages " . $pages;
+            }
 
-    // Clean response
-    $response = preg_replace('/^\xEF\xBB\xBF/', '', $response);
-    $response = mb_convert_encoding($response, 'UTF-8', 'UTF-8');
-
-    $output = json_decode($response, true);
-
-    if (!$output) {
-        throw new \Exception("Invalid JSON from RAG: " . $response);
-    }
-
-    $aiContent = $output['answer'] ?? 'No response.';
-
-    // Clean encoding
-    $aiContent = mb_convert_encoding($aiContent, 'UTF-8', 'UTF-8');
-    $aiContent = preg_replace('/[^\x{0009}\x{000A}\x{000D}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}\x{10000}-\x{10FFFF}]/u', '', $aiContent);
-
-    if (!empty($output['pages'])) {
-        $pages = implode(', ', $output['pages']);
-        $aiContent .= "\n\nSources: pages " . $pages;
-    }
-
-} catch (\Exception $e) {
-    $aiContent = 'RAG Error: ' . $e->getMessage();
-}
+        } catch (\Exception $e) {
+            $aiContent = 'RAG Error: ' . $e->getMessage();
+        }
 
         // ── 4. Save AI message ───────────────────────────────
         $aiMessage = Message::create([
