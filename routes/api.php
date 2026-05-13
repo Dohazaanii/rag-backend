@@ -4,14 +4,20 @@ use Illuminate\Support\Facades\Route;
 use App\Modules\User\Http\Controllers\UserController;
 use App\Modules\Chat\Http\Controllers\ChatController;
 use App\Modules\Chat\Http\Controllers\GeneralChatController;
+use Illuminate\Http\Request;
+use App\Modules\Chat\Http\Controllers\KpiController;
 
-Route::get('/bonjour', function () {
-    return response()->json([
-        'message' => 'Bonjour depuis Laravel !',
-    ]);
+
+
+Route::post('/kpi/analyze', [KpiController::class, 'analyze']);
+
+Route::post('/register', [UserController::class, 'register']);
+Route::post('/login', [UserController::class, 'login']);
+
+Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+    return $request->user();
 });
 
-Route::post('/login', [UserController::class, 'login']);
 Route::post('/ask', function (\Illuminate\Http\Request $request) {
     return \App\Services\RagService::ask(
         $request->question,

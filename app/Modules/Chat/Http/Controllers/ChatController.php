@@ -19,10 +19,11 @@ class ChatController extends Controller
 
     public function createConversation(Request $request)
     {
-        $conversation = Conversation::create([
-            'user_id' => $request->user()->id,
-            'title'   => 'New conversation',
-        ]);
+$conversation = Conversation::create([
+    'user_id' => $request->user()->id,
+    'title'   => 'New conversation',
+    'type'    => $request->input('type', 'general'),
+]);
 
         return response()->json($conversation);
     }
@@ -68,11 +69,16 @@ class ChatController extends Controller
         try {
             $question = $content ?: 'Please provide a concise summary of this document.';
 
-            $ragResponse = Http::timeout(300)->post('http://127.0.0.1:9000', [
-                'question'     => $question,
-                'file_content' => $fileContent,
-                'file_name'    => $fileName,
-            ]);
+$conversation = Conversation::find($id);
+$mode = $conversation->type ?? 'general';
+
+$ragResponse = Http::timeout(300)->post('http://127.0.0.1:9000', [
+    'question'     => $question,
+    'file_content' => $fileContent,
+    'file_name'    => $fileName,
+    'mode'         => $mode,
+    'user_id'      => $request->user()->id,
+]);
 
             $output = $ragResponse->json();
 

@@ -17,6 +17,7 @@ class GeneralChatController extends Controller
             'user_id' => $request->user()->id,
             'title'   => 'New conversation',
             'type'    => 'general',
+            'mode' => 'general',  
         ]);
 
         return response()->json($conversation);
